@@ -1,0 +1,256 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String        @id @default(uuid())
+  email           String        @unique
+  name            String
+  password        String
+  role            Role          @default(USER)
+  hasFaceEncoding Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  attendances     Attendance[]
+  faceEncoding    FaceEncoding?
+  leaveRequests   LeaveRequest[]
+  leaveBalance    LeaveBalance?
+  userPoints      UserPoints?
+  pointHistory    PointHistory[]
+  userBadges      UserBadge[]
+  redemptions     RewardRedemption[]
+
+  @@map("users")
+}
+
+model FaceEncoding {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  encodingData String   @db.LongText
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("face_encodings")
+}
+
+model Attendance {
+  id               String         @id @default(uuid())
+  userId           String
+  type             AttendanceType
+  timestamp        DateTime       @default(now())
+  latitude         Float
+  longitude        Float
+  location         String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  isLocationValid  Boolean?
+  locationDistance Float?
+  isLate           Boolean?       @default(false)
+  lateMinutes      Int?           @default(0)
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "attendances_userId_fkey")
+  @@map("attendances")
+}
+
+model LocationSetting {
+  id        String   @id @default(uuid())
+  latitude  Float
+  longitude Float
+  radius    Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("location_settings")
+}
+
+model TimeSettings {
+  id                String   @id @default(uuid())
+  maxClockInTime    String   @default("07:00") // Format: "HH:MM" - default 7:00 AM
+  minClockOutTime   String   @default("17:00") // Format: "HH:MM" - default 5:00 PM
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  isActive          Boolean  @default(true)
+
+  @@map("time_settings")
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum AttendanceType {
+  CHECK_IN
+  CHECK_OUT
+}
+
+model LeaveRequest {
+  id          String        @id @default(uuid())
+  userId      String
+  leaveType   LeaveType
+  startDate   DateTime
+  endDate     DateTime
+  reason      String?       @db.Text
+  status      LeaveStatus   @default(PENDING)
+  approvedBy  String?       // Admin ID who approved/rejected
+  approvedAt  DateTime?
+  rejectionReason String?   @db.Text
+  totalDays   Int           // Calculated days for this request
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId], map: "leave_requests_userId_idx")
+  @@index([status], map: "leave_requests_status_idx")
+  @@index([startDate, endDate], map: "leave_requests_dates_idx")
+  @@map("leave_requests")
+}
+
+model LeaveBalance {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  year            Int      // Year for which this balance applies
+  totalDays       Int      @default(12) // Total annual leave days
+  usedDays        Int      @default(0)  // Days already used
+  remainingDays   Int      @default(12) // Remaining days
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, year])
+  @@map("leave_balances")
+}
+
+enum LeaveType {
+  ANNUAL_LEAVE  // Cuti Tahunan
+  PERMISSION    // Izin
+  SICK_LEAVE    // Sakit
+  EMERGENCY     // Darurat
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model UserPoints {
+  id              String   @id @default(uuid())
+  userId          String
+  points          Int      @default(0)
+  totalEarned     Int      @default(0) // Total points ever earned
+  currentStreak   Int      @default(0) // Current attendance streak
+  longestStreak   Int      @default(0) // Longest attendance streak
+  lastUpdated     DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pointsHistory   PointHistory[]
+  badges          UserBadge[]
+  
+  @@unique([userId])
+  @@map("user_points")
+}
+
+model PointHistory {
+  id              String   @id @default(uuid())
+  userId          String
+  points          Int
+  reason          String
+  attendanceId    String?  // Reference to attendance record if applicable
+  date            DateTime @default(now())
+  createdAt       DateTime @default(now())
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userPoints      UserPoints @relation(fields: [userId], references: [userId])
+  
+  @@index([userId])
+  @@map("point_history")
+}
+
+model Badge {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  description     String
+  icon            String   // Icon identifier or URL
+  pointsRequired  Int      // Points needed to earn this badge
+  level           BadgeLevel
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  userBadges      UserBadge[]
+  
+  @@map("badges")
+}
+
+model UserBadge {
+  id              String   @id @default(uuid())
+  userId          String
+  badgeId         String
+  earnedAt        DateTime @default(now())
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badge           Badge    @relation(fields: [badgeId], references: [id])
+  userPoints      UserPoints @relation(fields: [userId], references: [userId])
+  
+  @@unique([userId, badgeId])
+  @@map("user_badges")
+}
+
+model Reward {
+  id              String   @id @default(uuid())
+  name            String
+  description     String
+  pointsCost      Int      // Points needed to redeem
+  quantity        Int      @default(0) // Available quantity (-1 for unlimited)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  redemptions     RewardRedemption[]
+  
+  @@map("rewards")
+}
+
+model RewardRedemption {
+  id              String   @id @default(uuid())
+  userId          String
+  rewardId        String
+  pointsSpent     Int
+  status          RedemptionStatus @default(PENDING)
+  redeemedAt      DateTime @default(now())
+  processedAt     DateTime?
+  notes           String?
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reward          Reward   @relation(fields: [rewardId], references: [id])
+  
+  @@index([userId])
+  @@map("reward_redemptions")
+}
+
+enum BadgeLevel {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+  DIAMOND
+}
+
+enum RedemptionStatus {
+  PENDING
+  APPROVED
+  DELIVERED
+  REJECTED
+}
